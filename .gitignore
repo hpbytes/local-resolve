@@ -5,4 +5,5 @@ playwright-report/
 *.sqlite3
 
 *-debug.log
+.netlify/
 .firebase/

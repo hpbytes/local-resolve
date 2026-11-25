@@ -1,11 +1,25 @@
 import { useEffect, useState } from "react";
+import { signOut } from "firebase/auth";
 import App from "./App";
 import { connectWorkspace } from "./services/cloud";
+import { auth } from "./services/firebase";
 import { leaveWorkspace } from "./services/workspace";
 export default function CloudApp() {
   const [ready, R] = useState(false),
     [error, E] = useState(""),
     [status, S] = useState("");
+  async function returnToLocal() {
+    try {
+      await signOut(auth);
+      leaveWorkspace();
+    } catch (e) {
+      E(
+        e instanceof Error
+          ? "Sign out failed. " + e.message
+          : "Sign out failed.",
+      );
+    }
+  }
   useEffect(() => {
     let active = true,
       stop: (() => void) | undefined;
@@ -35,7 +49,7 @@ export default function CloudApp() {
         <button onClick={() => location.reload()}>
           Reload saved workspace
         </button>{" "}
-        <button onClick={leaveWorkspace}>Return to local demo</button>
+        <button onClick={returnToLocal}>Return to local demo</button>
       </main>
     );
   if (!ready)

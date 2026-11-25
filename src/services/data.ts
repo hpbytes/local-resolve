@@ -279,13 +279,20 @@ window.addEventListener("storage", (e) => {
 });
 export const save = (patch: Partial<Data>) => useDB.setState(patch);
 export function reset() {
-  save(seed());
+  const data = seed();
+  if (cloudOwner) {
+    const activeId =
+        sessionStorage.getItem(roleKey) || localStorage.getItem(roleKey),
+      activeUser = useDB.getState().users.find((user) => user.id === activeId);
+    if (activeUser) data.users.push(activeUser);
+  }
+  save(data);
   Object.keys(localStorage)
     .filter((key) => key.startsWith(draftPrefix))
     .forEach((key) => localStorage.removeItem(key));
+  if (cloudOwner) return;
   sessionStorage.removeItem(roleKey);
   localStorage.removeItem(roleKey);
-  if (cloudOwner) return;
   indexedDB.deleteDatabase("lr-evidence");
   location.assign("/");
 }

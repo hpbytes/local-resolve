@@ -7,7 +7,8 @@ import {
 import { getBlob, ref, uploadBytes } from "firebase/storage";
 import { auth, authReady, database, storage } from "./firebase";
 import { cloudOwner } from "./workspace";
-import { useDB, type Data } from "./data";
+import { cloudIdentity } from "./identity";
+import { useDB, now, type Data, type User } from "./data";
 
 function owner() {
   if (!cloudOwner || auth.currentUser?.uid !== cloudOwner)
@@ -27,7 +28,11 @@ export async function connectWorkspace(
   report: (message: string, failed?: boolean) => void,
 ) {
   await authReady;
-  const item = doc(database, "privateWorkspaces", owner());
+  const firebaseUser = auth.currentUser;
+  if (!firebaseUser)
+    throw Error("Sign in with your Firebase account to open this workspace.");
+  const identity = await cloudIdentity(firebaseUser),
+    item = doc(database, "privateWorkspaces", owner());
   const initial = await runTransaction(database, async (tx) => {
     const snap = await tx.get(item);
     if (snap.exists()) return snap.data();
@@ -113,6 +118,37 @@ export async function connectWorkspace(
       report("Workspace connection failed. " + e.message, true);
     },
   );
+  const data = useDB.getState(),
+    existing = data.users.find((user) => user.id === firebaseUser.uid),
+    profile: User = {
+      ...existing,
+      id: firebaseUser.uid,
+      name:
+        firebaseUser.displayName?.trim() ||
+        firebaseUser.email?.split("@")[0] ||
+        "Firebase user",
+      email: firebaseUser.email || "",
+      role: identity.role,
+      locality: existing?.locality || data.locality,
+      createdAt: existing?.createdAt || now(),
+      enabled: true,
+      notify: existing?.notify ?? true,
+      departmentId: identity.departmentId,
+    };
+  sessionStorage.setItem("lr-cloud-role-" + firebaseUser.uid, firebaseUser.uid);
+  if (
+    !existing ||
+    existing.name !== profile.name ||
+    existing.email !== profile.email ||
+    existing.role !== profile.role ||
+    existing.departmentId !== profile.departmentId ||
+    !existing.enabled
+  )
+    useDB.setState({
+      users: existing
+        ? data.users.map((user) => (user.id === profile.id ? profile : user))
+        : [...data.users, profile],
+    });
   const beforeUnload = (e: BeforeUnloadEvent) => {
     if (writing || queued) {
       e.preventDefault();

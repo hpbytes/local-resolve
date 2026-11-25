@@ -7,21 +7,35 @@ import {
   useLocation,
 } from "react-router-dom";
 import {
-  useDB,
-  save,
-  session,
-  now,
-  uid,
-  type Role,
-  type User,
-} from "../../services/data";
-export async function hash(s: string) {
-  return Array.from(
-    new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)),
-    ),
-    (b) => b.toString(16).padStart(2, "0"),
-  ).join("");
+  browserLocalPersistence,
+  browserSessionPersistence,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  setPersistence,
+  signInWithEmailAndPassword,
+  updateProfile,
+} from "firebase/auth";
+import { auth, authReady } from "../../services/firebase";
+import { cloudOwner } from "../../services/workspace";
+import { activateCloudIdentity } from "../../services/identity";
+import { useDB, session, type User } from "../../services/data";
+
+function authError(error: unknown) {
+  const code =
+    typeof error === "object" && error && "code" in error
+      ? String(error.code)
+      : "";
+  if (code === "auth/invalid-credential")
+    return "Check your email and password.";
+  if (code === "auth/email-already-in-use")
+    return "An account with this email already exists.";
+  if (code === "auth/weak-password")
+    return "Choose a password with at least 8 characters.";
+  if (code === "auth/too-many-requests")
+    return "Too many attempts. Wait a moment and try again.";
+  if (code === "auth/network-request-failed")
+    return "Could not connect to Firebase. Check your connection and try again.";
+  return error instanceof Error ? error.message : "Authentication failed.";
 }
 export default function Auth() {
   const db = useDB(),
@@ -30,9 +44,10 @@ export default function Auth() {
     path = useLocation().pathname,
     registering = path === "/register",
     forgot = path === "/forgot-password",
-    [role, R] = useState<Role>("citizen"),
     [show, S] = useState(false),
     [err, E] = useState(""),
+    [message, M] = useState(""),
+    [busy, B] = useState(false),
     { register, handleSubmit, getValues } = useForm<Record<string, string>>();
   function login(u: User) {
     if (!u.enabled) {
@@ -47,125 +62,90 @@ export default function Auth() {
         : "/" + u.role + "/dashboard",
     );
   }
+  async function firebaseLogin(data: Record<string, string>) {
+    const email = data.email.toLowerCase().trim();
+    if (registering && data.password !== data.confirm) {
+      E("Passwords must match.");
+      return;
+    }
+    B(true);
+    E("");
+    M("");
+    try {
+      await authReady;
+      if (forgot) {
+        await sendPasswordResetEmail(auth, email);
+        M(
+          "If an account exists for this email, Firebase will send reset instructions.",
+        );
+        return;
+      }
+      await setPersistence(
+        auth,
+        data.remember ? browserLocalPersistence : browserSessionPersistence,
+      );
+      const credential = registering
+        ? await createUserWithEmailAndPassword(auth, email, data.password || "")
+        : await signInWithEmailAndPassword(auth, email, data.password || "");
+      if (registering)
+        await updateProfile(credential.user, {
+          displayName: data.name.trim(),
+        });
+      const { role } = await activateCloudIdentity(credential.user);
+      const next = sp.get("next"),
+        destination =
+          next?.startsWith("/") && !next.startsWith("//")
+            ? next
+            : "/" + role + "/dashboard";
+      location.assign(destination);
+    } catch (error) {
+      E(authError(error));
+    } finally {
+      B(false);
+    }
+  }
   return (
     <main className="wrap auth">
       <div className="panel form">
-        <small>LOCAL RESOLVE · DEMO ACCOUNT</small>
+        <small>LOCAL RESOLVE · FIREBASE ACCOUNT</small>
         <h1>
           {registering
-            ? "Create citizen account"
+            ? "Create account"
             : forgot
-              ? "Reset demo password"
+              ? "Reset password"
               : "Sign in"}
         </h1>
-        <p>Use fictional details and a demo-only password.</p>
-        {!registering && !forgot && (
-          <div className="choices">
-            {(["citizen", "officer", "admin"] as Role[]).map((r) => (
-              <button key={r} aria-pressed={role === r} onClick={() => R(r)}>
-                {r}
-              </button>
-            ))}
-          </div>
-        )}
-        <form
-          className="form"
-          onSubmit={handleSubmit(async (data) => {
-            const email = data.email.toLowerCase().trim(),
-              user = db.users.find((u) => u.email === email),
-              passwordHash = await hash(data.password || "");
-            if (forgot) {
-              E(
-                user?.passwordHash
-                  ? "For this browser demo, ask the administrator to reset your account password in User Management."
-                  : "Built-in demo accounts use LocalDemo123!",
-              );
-              return;
-            }
-            if (registering) {
-              if (user) {
-                E("This email is already registered.");
-                return;
-              }
-              if (data.password !== data.confirm) {
-                E("Passwords must match.");
-                return;
-              }
-              const u: User = {
-                id: uid(),
-                email,
-                phone: data.phone || "",
-                district: "Coimbatore",
-                name: data.name.trim(),
-                locality: data.locality,
-                role: "citizen",
-                enabled: true,
-                notify: true,
-                departmentId: "",
-                createdAt: now(),
-                passwordHash,
-              };
-              save({ users: [...db.users, u] });
-              login(u);
-              return;
-            }
-            if (
-              !user ||
-              user.role !== role ||
-              (user.passwordHash
-                ? user.passwordHash !== passwordHash
-                : data.password !== "LocalDemo123!")
-            ) {
-              E("Check the email, role and demo password.");
-              return;
-            }
-            login(user);
-          })}
-        >
+        <p>
+          Firebase secures your account. Workspace records sync privately to
+          that account.
+        </p>
+        <form className="form" onSubmit={handleSubmit(firebaseLogin)}>
           {registering && (
             <label>
               Full name
-              <input required {...register("name")} />
+              <input autoComplete="name" required {...register("name")} />
             </label>
           )}
           <label>
             Email
-            <input type="email" required {...register("email")} />
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              {...register("email")}
+            />
           </label>
-          {registering && (
-            <>
-              <label>
-                Phone (optional)
-                <input
-                  type="tel"
-                  pattern="[0-9 +()-]{7,18}"
-                  {...register("phone")}
-                />
-              </label>
-              <label>
-                District
-                <select>
-                  <option>Coimbatore</option>
-                </select>
-              </label>
-              <label>
-                Locality
-                <select {...register("locality")}>
-                  {db.localities.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
           {!forgot && (
             <>
               <label>
-                Demo password
+                Password
                 <input
                   type={show ? "text" : "password"}
                   required
                   minLength={registering ? 8 : 1}
+                  autoComplete={
+                    registering ? "new-password" : "current-password"
+                  }
                   {...register("password")}
                 />
               </label>
@@ -186,6 +166,7 @@ export default function Auth() {
                 <input
                   type={show ? "text" : "password"}
                   required
+                  autoComplete="new-password"
                   {...register("confirm")}
                 />
               </label>
@@ -202,18 +183,28 @@ export default function Auth() {
               </label>
             )
           )}
-          <button className="primary">
+          <button className="primary" disabled={busy}>
             {registering
-              ? "Register"
+              ? busy
+                ? "Creating account…"
+                : "Create account"
               : forgot
-                ? "Get reset instructions"
-                : "Sign in"}
+                ? busy
+                  ? "Sending…"
+                  : "Send reset instructions"
+                : busy
+                  ? "Signing in…"
+                  : "Sign in"}
           </button>
         </form>
-        <p role="status">{err}</p>
-        {!forgot && !registering && (
+        <p role="alert">{err}</p>
+        <p role="status">{message}</p>
+        {!cloudOwner && !forgot && !registering && (
           <>
-            <h3>Demonstration accounts</h3>
+            <h3>Local demo mode</h3>
+            <p>
+              These sample accounts do not use Firebase or sync across devices.
+            </p>
             <div className="choices">
               {db.users
                 .filter((u) => ["citizen", "officer", "admin"].includes(u.id))
@@ -227,11 +218,10 @@ export default function Auth() {
         )}
         <div className="spread">
           <Link to={registering || forgot ? "/login" : "/register"}>
-            {registering || forgot
-              ? "Back to sign in"
-              : "Register as a citizen"}
+            {registering || forgot ? "Back to sign in" : "Create an account"}
           </Link>
           {!forgot && <Link to="/forgot-password">Forgot password?</Link>}
+          <Link to="/cloud">Cloud workspace details</Link>
         </div>
       </div>
     </main>

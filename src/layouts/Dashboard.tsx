@@ -15,6 +15,9 @@ import {
   Plus,
   UserRound,
 } from "lucide-react";
+import { signOut } from "firebase/auth";
+import { auth } from "../services/firebase";
+import { cloudOwner, leaveWorkspace } from "../services/workspace";
 import {
   useDB,
   useUser,
@@ -40,6 +43,16 @@ export default function Dashboard() {
     [name, N] = useState(u.name),
     [loc, L] = useState(u.locality),
     [notify, V] = useState(u.notify);
+  function logout() {
+    if (cloudOwner) {
+      void signOut(auth)
+        .then(leaveWorkspace)
+        .catch(() => M("Sign out failed. Try again."));
+      return;
+    }
+    session("");
+    nav("/");
+  }
   const items = db.complaints.filter(
       (c) =>
         u.role === "admin" ||
@@ -116,12 +129,7 @@ export default function Dashboard() {
             </Link>
           );
         })}
-        <button
-          onClick={() => {
-            session("");
-            nav("/");
-          }}
-        >
+        <button onClick={logout}>
           <LogOut size={17} />
           Logout
         </button>
@@ -160,14 +168,7 @@ export default function Dashboard() {
                   Account settings
                 </Link>
                 <Link to="/login">Switch demo account</Link>
-                <button
-                  onClick={() => {
-                    session("");
-                    nav("/");
-                  }}
-                >
-                  Sign out
-                </button>
+                <button onClick={logout}>Sign out</button>
               </div>
             </details>
           </div>

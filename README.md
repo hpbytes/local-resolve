@@ -11,11 +11,11 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. To type-check and build the static application, run `npm run build`. Run `npm run preview` to serve the resulting `dist/` directory. A static hosting service should rewrite unknown application paths to `index.html`. No Python service or external login provider is required.
+Open the local URL printed by Vite. To type-check and build the static application, run `npm run build`. Run `npm run preview` to serve the resulting `dist/` directory. A static hosting service should rewrite unknown application paths to `index.html`. Local demo mode needs no Python service or Firebase account.
 
 ## Demonstration accounts
 
-Choose **Sign In** and then **citizen demo**, **officer demo**, or **admin demo**. For manual sign-in use citizen@demo.local, officer@demo.local or admin@demo.local, the matching role and the shared demo password `LocalDemo123!`. Register with fictional details only. Remember me persists the demonstration session beyond the current tab.
+Choose **Sign In** and then **citizen demo**, **officer demo**, or **admin demo** to use the local-only sample. For manual demo sign-in use citizen@demo.local, officer@demo.local or admin@demo.local and the shared demo password `LocalDemo123!`. These demo accounts do not use Firebase or sync across devices. The main email/password form creates or signs in to a Firebase account; those records sync to that account's private workspace.
 
 1. As a citizen, report a **Roads and Traffic** issue. The demo officer belongs to the Roads Department. Select a location, attach a JPEG, PNG, WebP, MP4 or WebM file (25 MB maximum per file), review and submit.
 2. Copy the report ID and open Track Complaint. Use `LR-2026-000124` to inspect a seeded report.
@@ -29,21 +29,26 @@ Choose **Sign In** and then **citizen demo**, **officer demo**, or **admin demo*
 - `src/pages/` contains the directory, reporting wizard, tracking, accounts, dashboards, analytics and configuration screens.
 - `src/components/` contains shared controls, evidence previews, complaint cards and the Leaflet map.
 - `src/services/data.ts` uses the interfaces in `src/types/` and defines seed data, the Zustand store, status events, session handling and IndexedDB media access.
+- `scripts/set-firebase-role.mjs` provisions trusted Firebase custom role claims using the Admin SDK and operator credentials.
 - `src/data/project.ts` accepts optional approved project team names.
 - `src/index.css` contains responsive layout and shared visual styles. Manrope is bundled locally. The locality bulletin pairs it with system serif headlines. Shared colours, spacing, borders, and responsive bulletin layouts are defined in `src/landing.css`.
 - `tests/workflow.spec.ts` exercises the citizen-to-officer-to-admin workflow in Microsoft Edge, including persisted attachments and responsive overflow checks.
 
 ## Persistence and integration
 
-LocalStorage holds structured demonstration data and drafts. IndexedDB holds attachment bytes. SessionStorage holds temporary demo sessions. Public complaint views display the issue location, description, history and attachments. Use evidence suitable for public viewing.
+LocalStorage holds structured local demonstration data and drafts. IndexedDB holds local attachment bytes. SessionStorage holds temporary local demo sessions. Public complaint views display the issue location, description, history and attachments. Use evidence suitable for public viewing.
 
-For a backend integration, replace the Zustand persistence adapter and client mutations with an authenticated API. Allocate report IDs on the server. Enforce department scope, ownership and permitted status transitions on every write. Commit status history and notifications together with the complaint update. Replace IndexedDB media IDs with validated object-storage references and replace demo login with real server-side sessions. The original Python/SQLite prototype is separate from the React application. Its records are not automatically migrated.
+For a shared civic deployment, replace the per-owner workspace snapshot and client mutations with authenticated APIs and shared collections. Allocate report IDs on the server. Enforce department scope, ownership and permitted status transitions on every write. Commit status history and notifications together with the complaint update. The original Python/SQLite prototype is separate from the React application. Its records are not automatically migrated.
 
 ## Scope and verification
 
 Local mode operates in one browser profile. Browser storage can be inspected, edited or cleared. Local mode provides no government routing, emergency response, cross-device synchronization, or email delivery. Cloud mode synchronizes records for its signed-in workspace owner. Map tiles require internet access and remain attributed to OpenStreetMap. Location permission is optional. Manual street and locality entry remains available when map tiles or location access are unavailable.
 
 To repeat browser QA on Windows with Microsoft Edge installed, run `npm run build` followed by `npm test`. Playwright serves the production build on port 4173 and uses an isolated browser profile. The test covers a map-selected report, uploaded evidence after refresh, verification, progress, resolution, feedback, admin totals, and horizontal overflow at 360, 768, 1024 and 1440 pixels.
+
+## Deploy to Netlify
+
+The root `netlify.toml` configures Netlify to run `npm run build`, publish `dist/`, use Node.js 24 and rewrite client-side routes to `index.html`. Connect this repository to a Netlify site and deploy from its production branch. After the site receives its `*.netlify.app` domain, add that domain to Firebase Authentication's authorized domains and configure Cloud Storage CORS for that origin before testing cloud sign-in or media previews.
 
 ## Photograph
 
@@ -54,7 +59,9 @@ The homepage filters notices, community reports, statistics and map markers by t
 
 ## Firebase backend
 
-Open **Cloud workspace** in the footer, create or sign in to a Firebase Email/Password account, then select a demonstration role in the usual Sign In screen. A cloud account owns a private workspace across devices. Local mode needs no account. Local records are never automatically uploaded. Firebase Analytics is not enabled.
+The main **Sign In** and **Create account** pages use Firebase Email/Password authentication. New accounts default to the `citizen` role. Trusted operators assign the `role` custom claim (`citizen`, `officer`, or `admin`) with the Admin SDK; officer accounts also require a `departmentId` claim. The browser never offers a role selector for Firebase accounts. Local demo role buttons remain available outside cloud mode only.
+
+Each Firebase UID owns a private workspace that syncs across that account's devices. Local demo records are never automatically uploaded, and different Firebase accounts do not share complaints. Custom claims control which client role view is shown; the current Firestore rules still allow only owner access to `privateWorkspaces/{uid}`. This prototype does not provide shared municipal records or server-side complaint authorization. Firebase Analytics is not enabled.
 
 ### Connect the live project
 
@@ -66,14 +73,23 @@ From a Firebase CLI account with access, review the existing rules for both serv
 firebase deploy --project local-resolve-a9edd --only firestore:rules,storage
 ```
 
-Firestore rules restrict each privateWorkspaces document to its owner. A revision transaction detects competing edits. A failed write blocks further editing and shows a reload action. Reports and demo configuration share one record capped at 950 KB; evidence is stored separately at workspaceMedia/{uid}/{fileId}. Unlinked attachments require separate retention cleanup. Reset restores workspace records. Drafts are device-local. Demo role switching is available to the workspace owner; public multi-user municipal access would require server-authorized roles and separate record collections.
+Firestore rules restrict each privateWorkspaces document to its owner. A revision transaction detects competing edits. A failed write blocks further editing and shows a reload action. Reports and demo configuration share one record capped at 950 KB; evidence is stored separately at workspaceMedia/{uid}/{fileId}. Unlinked attachments require separate retention cleanup. Reset restores workspace records. Drafts are device-local. Admin SDK claims must be assigned by trusted server-side code; never let a client write its own role claim. A shared multi-user municipal deployment requires separate server-authorized collections and corresponding Firestore rules.
+
+To provision a role from a trusted operator machine, authenticate Google Application Default Credentials with permission to administer Firebase Authentication, then run:
+
+```sh
+gcloud auth application-default login
+node scripts/set-firebase-role.mjs local-resolve-a9edd <firebase-user-uid> officer "Roads Department"
+```
+
+Use `citizen`, `officer`, or `admin` for the role. Officer assignments require a department ID. The command preserves unrelated custom claims and never exposes a privileged role selector in the client. A changed claim takes effect the next time the user signs in.
 
 ### Verify without live services
 
 With Firebase CLI and Java 21 installed, run:
 
 ```sh
-firebase emulators:exec --project demo-local-resolve --only auth,firestore,storage "node tests/firebase-emulator.mjs"
+firebase emulators:exec --project demo-local-resolve "node tests/claims-emulator.mjs && node tests/firebase-emulator.mjs && node tests/cloud-browser.mjs"
 ```
 
-For interactive emulator use, start the same services with `firebase emulators:start --project demo-local-resolve --only auth,firestore,storage` and set `VITE_FIREBASE_EMULATORS=true` when starting Vite. Emulator mode uses the demo project ID and loopback endpoints.
+The emulator command starts the services configured in `firebase.json`. For interactive use, run `firebase emulators:start --project demo-local-resolve` and set `VITE_FIREBASE_EMULATORS=true` when starting Vite. Emulator mode uses the demo project ID and loopback endpoints.

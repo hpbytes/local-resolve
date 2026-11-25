@@ -1,10 +1,5 @@
 import { initializeApp } from "firebase/app";
-import {
-  getAuth,
-  connectAuthEmulator,
-  setPersistence,
-  browserSessionPersistence,
-} from "firebase/auth";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getStorage, connectStorageEmulator } from "firebase/storage";
 
@@ -28,6 +23,4 @@ if (emulated) {
   connectFirestoreEmulator(database, "127.0.0.1", 8181);
   connectStorageEmulator(storage, "127.0.0.1", 9199);
 }
-export const authReady = setPersistence(auth, browserSessionPersistence).then(
-  () => auth.authStateReady(),
-);
+export const authReady = auth.authStateReady();
