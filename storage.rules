@@ -1,0 +1,11 @@
+rules_version = '2';
+service firebase.storage {
+ match /b/{bucket}/o {
+  match /workspaceMedia/{owner}/{id} {
+   function owns() { return request.auth != null && request.auth.uid == owner; }
+   allow get: if owns();
+   allow create: if owns() && request.resource.size <= 25*1024*1024
+    && request.resource.contentType.matches('(image/(jpeg|png|webp)|video/(mp4|webm))');
+  }
+ }
+}

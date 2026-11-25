@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  match /privateWorkspaces/{owner} {
+   function owns() { return request.auth != null && request.auth.uid == owner; }
+   function valid() { return request.resource.data.keys().hasOnly(['payload','revision','updatedAt'])
+    && request.resource.data.payload is string && request.resource.data.payload.size() <= 950000
+    && request.resource.data.revision is int && request.resource.data.updatedAt == request.time; }
+   allow get: if owns();
+   allow create: if owns() && valid() && request.resource.data.revision == 1;
+   allow update: if owns() && valid() && request.resource.data.revision == resource.data.revision + 1;
+  }
+ }
+}
